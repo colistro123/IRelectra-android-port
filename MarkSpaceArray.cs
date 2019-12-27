@@ -47,7 +47,7 @@ namespace Electra_Remote
 
         public void addBitWithManchesterCode(byte bit)
         {
-            if (currentState() == (bit & 1) != false)
+            if (currentState() == Convert.ToByte((bit & 1) != 0))
             {
                 addUnitsToNextState(1);
             }
@@ -61,7 +61,7 @@ namespace Electra_Remote
         {
             for (int j = numberOfBits - 1; j >= 0; j--)
             {
-                addBitWithManchesterCode(Convert.ToByte((code >> j) & 1));
+                addBitWithManchesterCode(Convert.ToByte(((code >> j) & 1) != 0));
             }
         }
         public void addUnitsToCurrentState(ushort units)
