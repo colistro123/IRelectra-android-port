@@ -11,9 +11,13 @@ using Android.OS;
 using Android.Runtime;
 using Android.Views;
 using Android.Widget;
+using System.Diagnostics;
+using DDebug = System.Diagnostics.Debug;
+using System.IO;
 
 namespace Electra_Remote
 {
+    //Originally from https://github.com/barakwei/IRelectra
     class IRelectra
     {
         public enum IRElectraMode
@@ -39,113 +43,74 @@ namespace Electra_Remote
 	        On = 0b1
         };
 
-        [StructLayout(LayoutKind.Explicit, Size = 1, Pack = 1, CharSet = CharSet.Ansi)]
-        public struct ElectraCode
+        [Flags]
+        public enum ElectraFlags
         {
-            public ElectraCode(int dummy)
-            {
-                // allocate the bitfield
-                num = new BitVector32(0);
+            Zero = 0,
+            One = 1,
+            Sleep = 18,
+            Temperature = 19,
+            IFeel = 24,
+            Swing = 25,
+            Notify = 27,
+            Fan = 28
+        };
 
-                // initialize bitfield sections
-                zeros1 = BitVector32.CreateSection(1);
-                ones1 = BitVector32.CreateSection(1, zeros1);
-                zeros2 = BitVector32.CreateSection(16, ones1);
-                sleep = BitVector32.CreateSection(1, zeros2);
-                temperature = BitVector32.CreateSection(4, sleep);
-                zeros3 = BitVector32.CreateSection(2, temperature);
-                swing = BitVector32.CreateSection(1, zeros3);
-                zeros4 = BitVector32.CreateSection(2, swing);
-                fan = BitVector32.CreateSection(2, zeros4);
-                mode = BitVector32.CreateSection(3, fan);
-                power = BitVector32.CreateSection(1, mode);
-            }
-
-            // Creates and initializes a BitVector32.
-            [FieldOffset(0)]
-            public BitVector32 num;
-            public static BitVector32.Section zeros1;
-            public static BitVector32.Section ones1;
-            public static BitVector32.Section zeros2;
-            public static BitVector32.Section sleep;
-            public static BitVector32.Section temperature;
-            public static BitVector32.Section zeros3;
-            public static BitVector32.Section swing;
-            public static BitVector32.Section zeros4;
-            public static BitVector32.Section fan;
-            public static BitVector32.Section mode;
-            public static BitVector32.Section power;
-            public bool Zeros1
-            {
-                get { return num[zeros1] != 0; }
-                set { num[zeros1] = value ? 1 : 0; }
-            }
-            public bool Ones1
-            {
-                get { return num[ones1] != 0; }
-                set { num[ones1] = value ? 1 : 0; }
-            }
-            public bool Zeros2
-            {
-                get { return num[zeros2] != 0; }
-                set { num[zeros2] = value ? 1 : 0; }
-            }
-            public bool Sleep
-            {
-                get { return num[sleep] != 0; }
-                set { num[sleep] = value ? 1 : 0; }
-            }
-            public int Temperature
-            {
-                get { return num[temperature]; }
-                set { num[temperature] = value; }
-            }
-            public bool Zeros3
-            {
-                get { return num[zeros3] != 0; }
-                set { num[zeros3] = value ? 1 : 0; }
-            }
-            public bool Swing
-            {
-                get { return num[swing] != 0; }
-                set { num[swing] = value ? 1 : 0; }
-            }
-            public bool Zeros4
-            {
-                get { return num[zeros4] != 0; }
-                set { num[zeros4] = value ? 1 : 0; }
-            }
-            public int Fan
-            {
-                get { return num[fan]; }
-                set { num[fan] = value; }
-            }
-            public int Mode
-            {
-                get { return num[mode]; }
-                set { num[mode] = value; }
-            }
-            public bool Power
-            {
-                get { return num[power] != 0; }
-                set { num[power] = value ? 1 : 0; }
-            }
+        public struct ElectraProperties
+        {
+            public bool Sleep;
+            public int Temperature;
+            public bool IFeel;
+            public bool Swing;
+            public bool Notify;
+            public int Fan;
         }
 
-        public static ushort    UNIT = 992; //992
+        public static ushort    UNIT = 1000; //992
         public static ushort    HDR_UNIT = 2976;
         public static ushort    END_UNIT = 3968;
         public static byte      NUM_BITS = 34;
-        public static int       ELECTRA_FREQ_HZ = 33000;
+        public static int       ELECTRA_FREQ_HZ = 38000;
+        public ElectraProperties acProperties;
+
+        public void setACTemp(int temp)
+        {
+            acProperties = getElectraProperties();
+            acProperties.Temperature = temp;
+        }
+        public int getACTemp()
+        {
+            return getElectraProperties().Temperature;
+        }
+        public ElectraProperties getElectraProperties()
+        {
+            if (acProperties.Equals(default(ElectraProperties)))
+            {
+                acProperties = new ElectraProperties();
+            }
+            return acProperties;
+        }
         public bool sendElectra(bool power, IRElectraMode mode, IRElectraFan fan, int temperature, bool swing, IRElectraIFeel iFeel, bool sleep, bool notify)
         {
+            // get the data representing the configuration
             ulong code = encodeElectra(power, mode, fan, temperature, swing, iFeel, sleep, notify);
+
+            // get the raw data itself with headers, repetition, etc.
             List<int> data = generateSignal(code).Select(i => (int)i).ToList();
-            string dataString = string.Join(",", data.ToArray());
+            string dataString = string.Join(", ", data.ToArray());
+            
+
+            string lines = string.Join(System.Environment.NewLine, dataString.Split()
+    .Select((word, index) => new { word, index })
+    .GroupBy(x => x.index / 6)
+    .Select(grp => string.Join(" ", grp.Select(x => x.word))));
+
+            DDebug.WriteLine(lines);
+
             MainActivity.mCIR.Transmit(ELECTRA_FREQ_HZ, data.ToArray());
             return true;
         }
-        
+
         public List<uint> generateSignal(ulong code)
         {
             MarkSpaceArray markspace = new MarkSpaceArray(UNIT);
@@ -159,11 +124,10 @@ namespace Electra_Remote
             for (int k = 0; k < 3; k++)
             {
                 markspace.addMark(3); //mark
-                markspace.addSpace(3); //space
+                markspace.addSpace(3); //space 3
 
                 markspace.addNumberWithManchesterCode(code, NUM_BITS);
             }
-
             markspace.addMark(4);
             return markspace.data();
         }
@@ -183,24 +147,6 @@ namespace Electra_Remote
         //     0: Zero
         public ulong encodeElectra(bool power, IRElectraMode mode, IRElectraFan fan, int temperature, bool swing, IRElectraIFeel iFeel, bool sleep, bool notify)
         {
-
-            #region oldElectraBitmasks
-            /*
-            var electraCode = new ElectraCode(0)
-            {
-                Ones1 = true,
-                Sleep = sleep,
-                Temperature = temperature,
-                Swing = swing,
-                Fan = Convert.ToInt32(fan),
-                Mode = Convert.ToInt32(mode),
-                Power = power
-            };
-
-
-            ulong code = Convert.ToUInt64(electraCode.num.Data);
-            */
-            #endregion
             //Notify is apparently used in conjunction with iFeel
             temperature -= notify ? 15 : 5;
 
@@ -211,23 +157,11 @@ namespace Electra_Remote
             num |= ((Convert.ToUInt64(notify) & 1) << 27);
             num |= ((Convert.ToUInt64(swing) & 1) << 25);
             num |= ((Convert.ToUInt64(iFeel) & 1) << 24); //ifeel
-            num |= ((Convert.ToUInt64(temperature) & 31) << 19);
+            num |= ((Convert.ToUInt64(temperature) & 31) << 19); //ANDing is used to prevent an overflow/invalid temps
             num |= ((Convert.ToUInt64(sleep) & 1) << 18);
             num |= 2;
 
             return num;
-        }
-        /*
-         * API 21+, this is wrong don't use it
-        */
-        public int[] convertTransmission(int[] transmission)
-        {
-            int cycleLengthMicroSeconds = Convert.ToInt32(ELECTRA_FREQ_HZ * 0.00005);
-            int[] transmissionConverted = transmission.ToArray();
-            for (int i = 0; i < transmission.Count(); i++)
-                transmissionConverted[i] = transmission[i] * cycleLengthMicroSeconds;
-
-            return transmissionConverted;
         }
     }
 }
