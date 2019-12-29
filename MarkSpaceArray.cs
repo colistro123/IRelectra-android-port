@@ -114,7 +114,7 @@ namespace Electra_Remote
         //Returns 1 for mark, 0 for state
         public byte currentState()
         {
-            return Convert.ToByte(_data.Count % 2); ;
+            return Convert.ToByte(_data.Count % 2);
         }
 
     }
