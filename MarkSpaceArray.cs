@@ -23,41 +23,85 @@ namespace Electra_Remote
         // the raw data. Make sure that the first thing you add to the array is
         // at least one mark.
 
-        ushort _unitLength = 0;
+        uint _unitLength = 0;
 
         // Array containing timing for marks and spaces, starts with marks.
         List<uint> _data = new List<uint>();
 
         // Initialize the array with a specific unit length. This is the clock used
         // in the Manchester code.
-        public MarkSpaceArray(ushort unitLengthInUsec)
+        public MarkSpaceArray(uint unitLengthInUsec)
         {
             _unitLength = unitLengthInUsec;
         }
 
+        public void addArray(List<uint> array)
+        {
+            List<uint> data = array;
+            int i = 0;
+
+            if (data.Count() > 0 && data[0] == 0)
+            {
+                ++i;
+            }
+            for (; i < data.Count(); ++i)
+            {
+                if (i % 2 == 0)
+                {
+                    addMark(data[i]);
+                }
+                else
+                {
+                    addSpace(data[i]);
+                }
+            }
+        }
+
+        public void addArray(MarkSpaceArray array)
+        {
+            List<uint> data = array.data();
+            int i = 0;
+
+            if (data.Count() > 0 && data[0] == 0)
+            {
+                ++i;
+            }
+            for (; i < data.Count(); ++i)
+            {
+                if (i % 2 == 0)
+                {
+                    addMark(data[i]);
+                }
+                else
+                {
+                    addSpace(data[i]);
+                }
+            }
+        }
+
         // Add a number of time units with mark.
-        public void addMark(ushort units)
+        public void addMark(uint units)
         {
             if (Convert.ToBoolean(currentState()))
             {
-                addUnitsToCurrentState(units);
+                addTimeToCurrentState(units);
             }
             else
             {
-                addUnitsToNextState(units);
+                addTimeToNextState(units);
             }
         }
 
         // Add a number of time units with space
-        public void addSpace(ushort units)
+        public void addSpace(uint units)
         {
             if (!Convert.ToBoolean(currentState()))
             {
-                addUnitsToCurrentState(units);
+                addTimeToCurrentState(units);
             }
             else
             {
-                addUnitsToNextState(units);
+                addTimeToNextState(units);
             }
         }
 
@@ -68,22 +112,23 @@ namespace Electra_Remote
         {
             if (currentState() == Convert.ToByte((bit & 1) != 0))
             {
-                addUnitsToNextState(1);
+                addTimeToNextState(1);
             }
             else
             {
-                addUnitsToCurrentState(1);
+                addTimeToCurrentState(1);
             }
-            addUnitsToNextState(1);
+            addTimeToNextState(1);
         }
 
         // Encodes a given number of bits from the given number bit by bit with 
         // IEEE 802.3 Manchester coding and adds it to the array. MSB first.
-        public void addNumberWithManchesterCode(ulong code, byte numberOfBits)
+        public void addNumberWithManchesterCode(long code, byte numberOfBits)
         {
             for (int j = numberOfBits - 1; j >= 0; j--)
             {
                 addBitWithManchesterCode(Convert.ToByte(((code >> j) & 1)));
+                //var num = this.data();
             }
         }
 
@@ -91,18 +136,27 @@ namespace Electra_Remote
         // looks like this: { 1*UNIT, 1*UNIT } (equal to calling addMark(1)
         // followed by addSpace(1), the current state is SPACE (currentState()==0)
         // calling this function will change the array to { 1*UNIT, 2*UNIT }.
-        public void addUnitsToCurrentState(ushort units)
+        public void addTimeToCurrentState(uint units)
         {
-            _data[_data.Count - 1] += Convert.ToUInt32(_unitLength * units);
+            //_data[_data.Count - 1] += _unitLength * units;
+            if (_data.Count() == 0)
+            {
+                _data.Add(0);
+                _data.Add(units);
+            }
+            else
+            {
+                _data[_data.Count() - 1] += units;
+            }
         }
 
         // Add more time to the other state. For example, if the array
         // looks like this: { 1*UNIT, 1*UNIT } (equal to calling addMark(1)
         // followed by addSpace(1), the current state is SPACE (currentState()==0)
         // calling this function will change the array to { 1*UNIT, 1*UNIT, 1*UNIT }
-        public void addUnitsToNextState(ushort units)
+        public void addTimeToNextState(uint units)
         {
-            _data.Add(Convert.ToUInt32(_unitLength * units));
+            _data.Add(units);
         }
 
         //Returns data containing marks and spaces

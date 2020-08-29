@@ -24,9 +24,9 @@ namespace Electra_Remote
         {
             IRElectraModeCool = 0b001,
             IRElectraModeHeat = 0b010,
-            IRElectraModeAuto = 0b011,
+            IRElectraModeFan = 0b101,
             IRElectraModeDry = 0b100,
-            IRElectraModeFan = 0b101
+            IRElectraModeAuto = 0b011,
         };
 
         public enum IRElectraFan
@@ -66,11 +66,11 @@ namespace Electra_Remote
             public int Fan;
         }
 
-        public static ushort    UNIT = 1000; //992
+        public static uint    UNIT = 992; //992
         public static ushort    HDR_UNIT = 2976;
         public static ushort    END_UNIT = 3968;
         public static byte      NUM_BITS = 34;
-        public static int       ELECTRA_FREQ_HZ = 38000;
+        public static int       ELECTRA_FREQ_HZ = 33000;
         public ElectraProperties acProperties;
 
         public void setACTemp(int temp)
@@ -90,13 +90,42 @@ namespace Electra_Remote
             }
             return acProperties;
         }
+        public int codeRepetitions()
+        {
+            return 3;
+        }
+
+        public int modulationFrequency()
+        {
+            return 33;
+        }
+
+        public List<uint> packetHeader()
+        {
+            return new List<uint>(new uint[] { IRelectra.UNIT });
+        }
+
+        public List<uint> packetTail()
+        {
+            return new List<uint>(new uint[] { IRelectra.UNIT * 4 });
+        }
+
+        public List<uint> codeHeader()
+        {
+            return new List<uint>(new uint[] { IRelectra.UNIT * 3, IRelectra.UNIT * 3 });
+        }
+
+        public List<uint> codeTail()
+        {
+            return new List<uint>(new uint[] { });
+        }
+
         public bool sendElectra(bool power, IRElectraMode mode, IRElectraFan fan, int temperature, bool swing, IRElectraIFeel iFeel, bool sleep, bool notify)
         {
             // get the data representing the configuration
-            ulong code = encodeElectra(power, mode, fan, temperature, swing, iFeel, sleep, notify);
 
             // get the raw data itself with headers, repetition, etc.
-            List<int> data = generateSignal(code).Select(i => (int)i).ToList();
+            List<int> data = fullPacket(power, mode, fan, temperature, swing, iFeel, sleep, notify).Select(i => (int)i).ToList();
             string dataString = string.Join(", ", data.ToArray());
             
 
@@ -105,31 +134,26 @@ namespace Electra_Remote
     .GroupBy(x => x.index / 6)
     .Select(grp => string.Join(" ", grp.Select(x => x.word))));
 
-            DDebug.WriteLine(lines);
+            DDebug.WriteLine($"({data.Count}) {lines}");
 
             MainActivity.mCIR.Transmit(ELECTRA_FREQ_HZ, data.ToArray());
             return true;
         }
 
-        public List<uint> generateSignal(ulong code)
+        public List<uint> fullPacket(bool power, IRElectraMode mode, IRElectraFan fan, int temperature, bool swing, IRElectraIFeel iFeel, bool sleep, bool notify)
         {
-            MarkSpaceArray markspace = new MarkSpaceArray(UNIT);
-
-            // The whole packet looks this:
-            //  3 Times: 
-            //    3000 usec MARK
-            //    3000 used SPACE
-            //    Maxchester encoding of the data, clock is ~1000usec
-            // 4000 usec MARK
-            for (int k = 0; k < 3; k++)
+            MarkSpaceArray packet = new MarkSpaceArray(UNIT);
+            MarkSpaceArray codeArr = encodeElectra(power, mode, fan, temperature, swing, iFeel, sleep, notify);
+            //MarkSpaceArray markspace = new MarkSpaceArray(UNIT);
+            packet.addArray(packetHeader());
+            for (int k = 0; k < codeRepetitions(); k++)
             {
-                markspace.addMark(3); //mark
-                markspace.addSpace(3); //space 3
-
-                markspace.addNumberWithManchesterCode(code, NUM_BITS);
+                packet.addArray(codeHeader());
+                packet.addArray(codeArr);
+                packet.addArray(codeTail());
             }
-            markspace.addMark(4);
-            return markspace.data();
+            packet.addArray(packetTail());
+            return packet.data();
         }
 
         // Encodes specific A/C configuration to a number that describes
@@ -145,7 +169,7 @@ namespace Electra_Remote
         // 17- 2: Zeros
         //     1: One
         //     0: Zero
-        public ulong encodeElectra(bool power, IRElectraMode mode, IRElectraFan fan, int temperature, bool swing, IRElectraIFeel iFeel, bool sleep, bool notify)
+        public MarkSpaceArray encodeElectra(bool power, IRElectraMode mode, IRElectraFan fan, int temperature, bool swing, IRElectraIFeel iFeel, bool sleep, bool notify)
         {
             //Notify is apparently used in conjunction with iFeel
             temperature -= notify ? 15 : 5;
@@ -159,9 +183,11 @@ namespace Electra_Remote
             num |= ((Convert.ToUInt64(iFeel) & 1) << 24); //ifeel
             num |= ((Convert.ToUInt64(temperature) & 31) << 19); //ANDing is used to prevent an overflow/invalid temps
             num |= ((Convert.ToUInt64(sleep) & 1) << 18);
-            num |= 2;
+            num |= 2; //fullstate flags?
 
-            return num;
+            IREncoder encoder = new IREncoder(UNIT);
+            encoder.addNumber(num, NUM_BITS);
+            return encoder.data();
         }
     }
 }
